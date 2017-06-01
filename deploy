@@ -1,0 +1,98 @@
+#!/bin/bash
+
+# Stop secution as soon as there is any error
+set -e
+
+usage() {
+  cat <<EOF
+
+  Usage: deploy <options> <mode>
+
+  Options:
+    -u <github-user>            The GitHub user
+    -r <github-repo>            The GithUb repo name
+    -t <github-tag>             The GitHub tag to be deployed
+    -p <procname>               The PM2 process-name to be (re)started
+
+  Modes:
+    -m setup|update|rollback    setup: Performs initial setup before starting the app
+                                update: Only updates the app to the specified tag
+                                rollback: Rollsback to previous deployment
+
+EOF
+}
+
+# process commandline argument
+while getopts ":urtpm" opt; do 
+  case $opt in
+    u)
+      GITHUB_USER=$OPTARG
+    ;;
+    r)
+      GITHUB_REPO=$OPTARG
+    ;;
+    t)
+      GITHUB_TAG=$OPTARG
+    ;;
+    p)
+      PM2_APP_NAME=$OPTARG
+    ;;
+    m)
+      MODE=$OPTARG
+    ;;
+    \?)
+      echo "Invalid option: -$OPTARG";
+      exit 1
+    ;;
+    :)
+      echo "Option -$OPTARG requires an argument"
+    ;;
+  esac
+done
+
+# LATEST_URL="https://github.com/journeymanavi/apartment-uncomplex-api/releases/latest"
+# REDIRECTED_LATEST_URL="https://github.com/journeymanavi/apartment-uncomplex-api/releases/tag/v0.0.2"
+DEPLOY_DIR=${GITHUB_REPO}-${GITHUB_TAG}
+DEPLOY_FILE=${DEPLOY_DIR}.tar.gz
+ARTIFACT_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download/${GITHUB_TAG}/${DEPLOY_FILE}"
+
+echo "GITHUB_USER:      ".$GITHUB_USER
+echo "GITHUB_REPO:      ".$GITHUB_REPO
+echo "GITHUB_TAG:       ".$GITHUB_TAG
+echo "DEPLOY_DIR:       ".$DEPLOY_DIR
+echo "DEPLOY_FILE:      ".$DEPLOY_FILE
+echo "ARTIFACT_URL:     ".$ARTIFACT_URL
+
+# Print commands before executing
+set -x
+
+echo "Ha Ha"
+
+# Fetch deployment artefacts
+rm -fr $DEPLOY_DIR
+mkdir $DEPLOY_DIR
+curl -sL $ARTIFACT_URL -o ${DEPLOY_DIR}/${DEPLOY_FILE}
+
+# Extract the fetched artefacts
+tar -xf $DEPLOY_DIR/$DEPLOY_FILE -C $DEPLOY_DIR
+rm -f $DEPLOY_DIR/$DEPLOY_FILE
+
+# Install app dependencies
+cd $DEPLOY_DIR
+yarn install
+cd ..
+
+# Run backups as needed
+
+# Bring the application down
+# pm2 stop $PM2_APP_NAME
+
+# Run any supporting deployment scripts
+
+# Switch symlinks
+ln -s $DEPLOY_DIR current
+
+# Bring application back up
+# pm2 start $PM2_APP_NAME
+
+# Housekeep
