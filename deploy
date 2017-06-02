@@ -15,9 +15,10 @@ function usage {
 
   Arguments:
     ** Required for all modes **
-    -n <app-name>               app name
+    -n <app-name>               App name
 
     ** Reuqired only for 'setup' mode **
+    -a <app-main-script>        Name of the entry point script of the app
     -u <github-user>            GitHub user
     -r <github-repo>            GithUb repo
     -e <file/"name val">        The environment variables to be set for the app
@@ -54,9 +55,15 @@ function validate_env {
 # Function to process environment to be used for running application process
 #
 # This function uses a bash idiom to read and process file input line-by-line
-# while IFS= read -r line; do
-#   # do something with $line
-# done < <filename>
+#
+#     while IFS= read -r line; do
+#       # do something with $line
+#     done < $FILENAME
+#
+#     while IFS= read -r line; do
+#       # do something with $line
+#     done <<< "$VARIABLE"
+#
 # here
 # IFS            : is a special shell variable that sets the "Internal Field Separator"
 #                  this then controls the behavior of many shell built in operation that
@@ -88,12 +95,13 @@ function process_env {
 }
 
 # Initialize variables to receive command line arguments
+MODE="deploy" #default
 APP_NAME=""
 GITHUB_USER=""
 GITHUB_REPO=""
 APP_ENV=""
 GITHUB_TAG=""
-MODE="deploy" #default
+TMP_DIR="./tmp"
 
 # process command line argument
 while getopts ":dsru:r:t:n:e:" opt; do 
@@ -110,6 +118,9 @@ while getopts ":dsru:r:t:n:e:" opt; do
     n)
       APP_NAME=$OPTARG
     ;;
+    n)
+      APP_SCRIPT=$OPTARG
+    ;;
     u)
       GITHUB_USER=$OPTARG
     ;;
@@ -117,7 +128,8 @@ while getopts ":dsru:r:t:n:e:" opt; do
       GITHUB_REPO=$OPTARG
     ;;
     e)
-      validate_env $OPTARG && process_env $OPTARG
+      validate_env $OPTARG
+      process_env $OPTARG
     ;;
     t)
       GITHUB_TAG=$OPTARG
@@ -135,79 +147,117 @@ done
 
 #### main ####
 
-# Print commands before executing
-set -x
-
 echo "MODE           : "${MODE}
 
 validate_required_arg "$APP_NAME" "ERROR: App name not specified"
-echo "APP_NAME   : "${APP_NAME}
+echo "APP_NAME       : "${APP_NAME}
 
 if [[ $MODE = 'setup' ]]; then
-  #statements
+  validate_required_arg "$APP_SCRIPT" "ERROR: Application script not specified"
   validate_required_arg "$GITHUB_USER" "ERROR: GitHub user not specified"
-  echo "GITHUB_USER    : "${GITHUB_USER}
   validate_required_arg "$GITHUB_REPO" "ERROR: GitHub repo not specified"
-  echo "GITHUB_REPO    : "${GITHUB_REPO}
-  echo "APP_ENV        : "${APP_ENV}
 
-  DEPLOY_DIR=${GITHUB_REPO}-${GITHUB_TAG}
-  echo "DEPLOY_DIR     : "${DEPLOY_DIR}
-  DEPLOY_FILE=${DEPLOY_DIR}.tar.gz
-  echo "DEPLOY_FILE    : "${DEPLOY_FILE}
+  RELEASES_DIR="./${APP_NAME}/releases"
+
+  LOG_DIR="./${APP_NAME}/logs"
+  LOG_FILE="${APP_NAME}.log"
+
+  # Print commands before executing
+  set -x
 
   #create the required directories
+  if [[ ! -d $APP_NAME ]]; then
+    mkdir $APP_NAME
+  else
+    rm -fr $APP_NAME/$RELEASES_DIR
+    mkdir $RELEASES_DIR
+  fi
 
   #create the required config files
+  # {
+  #   "apps" : [
+  #     {
+  #       "name"            : <appname>,
+  #       "instances"       : 1,
+  #       "cwd"             : <point to current release dir>,
+  #       "script"          : <appscript with path relative to cwd>,
+  #
+  #       "log_date_format" : “YYYY-MM-DD HH:mm Z”,
+  #       "error_file"      : <filename with path relative to cwd>,
+  #       "out_file"        : <filename with path relative to cwd>,
+  #       "pid_file"        : <filename with path relative to cwd>,
+  #
+  #       "env": {
+  #           <insert env>,
+  #          "NODE_ENV"     : "production"
+  #        }
+  #     }
+  #   ]
+  # }
+
+  CONFIG_FILE="deploy.conf"
+  echo "APP_NAME|"${APP_NAME}
+  echo "APP_SCRIPT|"%{APP_SCRIPT}
+  echo "RELEASES_DIR|"${RELEASES_DIR}
+  echo "ARTIFACT_FILE|"${ARTIFACT_FILE}
+  echo "LOG_DIR|"${LOG_DIR}
+  echo "LOG_FILE|"${LOG_FILE}
+  echo "APP_ENV|"${APP_ENV}
+  
+  echo "GITHUB_USER|"${GITHUB_USER}
+  echo "GITHUB_REPO|"${GITHUB_REPO}
 fi
 
 if [[ $MODE = 'deploy' ]]; then
   validate_required_arg "$GITHUB_TAG" "ERROR: GitHub tag not specified"
   echo "GITHUB_TAG     : "${GITHUB_TAG}
   
-  # read config from file
+  # read config from file (show error if absent)
 
-  # fetch deployment artifact
   ARTIFACT_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download/${GITHUB_TAG}/${DEPLOY_FILE}"
   # LATEST_URL="https://github.com/journeymanavi/apartment-uncomplex-api/releases/latest"
   # REDIRECTED_LATEST_URL="https://github.com/journeymanavi/apartment-uncomplex-api/releases/tag/v0.0.2"
   echo "ARTIFACT_URL   : "${ARTIFACT_URL}
+  
+  # Print commands before executing
+  set -x
+
+  # Fetch deployment artifacts
+  mkdir "$TMP_DIR"
+  ARTIFACT_FILE="${TMP_DIR}/${DEPLOY_FILE}"
+  curl -sL "${ARTIFACT_URL}" -o "${ARTIFACT_FILE}"
+
+  # Extract the fetched artifacts
+  tar -xf "${ARTIFACT_FILE}" -C $DEPLOY_DIR
+  rm -f $DEPLOY_DIR/$DEPLOY_FILE
+
+  # Install app dependencies
+  cd $DEPLOY_DIR
+  yarn install
+  cd ..
+
+  # Run backups as needed
+
+  # Bring the application down
+  # pm2 stop $APP_NAME
+
+  # Run any supporting deployment scripts
+
+  # Switch symlinks
+  ln -s $DEPLOY_DIR current
+
+  # Bring application back up
+  # pm2 start <proc_file> --update-env
+
+  #Check app up
+
+  #Write to deployment log
 fi
 
-
-exit 1
-
-# Create directories as needed
-if [[ ! -d $APP_NAME ]]; then
-  mkdir $APP_NAME
-else
-  rm -fr $APP_NAME/$DEPLOY_DIR
-  mkdir $DEPLOY_DIR
+if [[ $MODE = 'rollback' ]]; then
+  echo "rollback not imlemented yet"
 fi
 
-# Fetch deployment artifacts
-curl -sL $ARTIFACT_URL -o $APP_NAME/${DEPLOY_DIR}/${DEPLOY_FILE}
-
-# Extract the fetched artifacts
-tar -xf $DEPLOY_DIR/$DEPLOY_FILE -C $DEPLOY_DIR
-rm -f $DEPLOY_DIR/$DEPLOY_FILE
-
-# Install app dependencies
-cd $DEPLOY_DIR
-yarn install
-cd ..
-
-# Run backups as needed
-
-# Bring the application down
-# pm2 stop $APP_NAME
-
-# Run any supporting deployment scripts
-
-# Switch symlinks
-ln -s $DEPLOY_DIR current
-
-# Bring application back up
-# pm2 start $APP_NAME
-
-# Housekeep
+# Housekeep and exit
+rmdir $TMP_DIR
+exit 0
