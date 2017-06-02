@@ -1,63 +1,126 @@
 #!/bin/bash
 
-# Stop secution as soon as there is any error
+# Stop execution as soon as there is any error
 set -e
 
 function usage {
   cat <<EOF
 
-  Usage: deploy <options> <mode>
+  Usage: deploy <mode--option> <arguments>
 
-  Options:
-    -u <github-user>            The GitHub user
-    -r <github-repo>            The GithUb repo
-    -t <github-tag>             The GitHub tag to be deployed
-    -p <pm2-app>                The PM2 app name
-    -e <file/"name val">        The environment variables to be set for PM2.
-                                This can either specify a file containing all 
-                                environment variables (format: name val\n) or
-                                multiple instances of -e can be used to set 
-                                individual env variables
+  Mode Options:
+    -d                          deploy   : Perform fresh deployment (default)
+    -s                          setup    : Perform one-time setup
+    -r                          rollback : Rolls back to previous deployment
 
-  Modes:
-    -m deploy|rollback          deploy (default): Performs fresh deployment
-                                rollback: Rollsback to previous deployment
+  Arguments:
+    ** Required for all modes **
+    -n <app-name>               app name
+
+    ** Reuqired only for 'setup' mode **
+    -u <github-user>            GitHub user
+    -r <github-repo>            GithUb repo
+    -e <file/"name val">        The environment variables to be set for the app
+                                
+                                The argument can either be a file containing all 
+                                environment variables (format: "name val", one 
+                                per line)
+                                or
+                                one or more instances of -e can be used to set
+                                individual env variables (format: "name val")
+
+    ** Required only for 'deploy' mode **    
+    -t <github-tag>             GitHub tag to be deployed
 
 EOF
 }
 
-PM2_ENV=""
-function process_env {
-  arg = $1
-  if [[ -f $1 ]]; then
-    
-  else
+function validate_required_arg {
+  if [[ -z $1 ]]; then
+    echo $2
+    usage
+    exit 1
+  fi  
+}
 
-    PM2_ENV=$PM2_ENV
+function validate_env {
+  if [[ ! -r $1 ]] && ( [[ ! -n $1 ]] || [[ ! -n $2 ]] ); then
+    echo "ERROR: Invalid environment argument"
+    usage
+    exit 1
   fi
 }
 
-MODE="deploy"
-# process commandline argument
-while getopts ":u:r:t:p:m:" opt; do 
+# Function to process environment to be used for running application process
+#
+# This function uses a bash idiom to read and process file input line-by-line
+# while IFS= read -r line; do
+#   # do something with $line
+# done < <filename>
+# here
+# IFS            : is a special shell variable that sets the "Internal Field Separator"
+#                  this then controls the behavior of many shell built in operation that
+#                  perform string splitting etc. based on this variable (e.g. read)
+#                  In this case setting it to nothing is equal to 'unsetting' it
+#                  i.e. string splitting is effectively disabled
+# read -r        : -r makes read ignore \ escaped characters (e.g. \n)
+# < <filename>   : <filename> id opened for reading and contents redirected to STDIN
+#
+# This function uses bash Arrays (does not anymore but this comment left for reference)
+# arr=($var)     : Array assignment. Here the value of $var will undergo 
+#                  Word Splitting using $IFS and the resulting values will be 
+#                  set in the array as items
+# ${arr[i]}      : Accessing array elements
+function process_env {
+  if [[ -r $1 ]]; then
+    while read -r name val; do
+      if [[ -n $APP_ENV ]]; then
+        APP_ENV="${APP_ENV},"
+      fi
+      APP_ENV="${APP_ENV}\"$name\":\"$val\""
+    done < $1
+  else
+    if [[ -n $APP_ENV ]]; then
+      APP_ENV="${APP_ENV},"
+    fi
+    APP_ENV="${APP_ENV}\"$1\":\"$2\""
+  fi
+}
+
+# Initialize variables to receive command line arguments
+APP_NAME=""
+GITHUB_USER=""
+GITHUB_REPO=""
+APP_ENV=""
+GITHUB_TAG=""
+MODE="deploy" #default
+
+# process command line argument
+while getopts ":dsru:r:t:n:e:" opt; do 
   case $opt in
+    d)
+      MODE="deploy"
+    ;;
+    s)
+      MODE="setup"
+    ;;
+    r)
+      MODE="rollback"
+    ;;
+    n)
+      APP_NAME=$OPTARG
+    ;;
     u)
       GITHUB_USER=$OPTARG
     ;;
     r)
       GITHUB_REPO=$OPTARG
     ;;
+    e)
+      validate_env $OPTARG && process_env $OPTARG
+    ;;
     t)
       GITHUB_TAG=$OPTARG
-    ;;
-    p)
-      PM2_APP_NAME=$OPTARG
-    ;;
-    m)
-      MODE=$OPTARG
-    ;;
-    e)
-      process_env $OPTARG
     ;;
     \?)
       echo "Invalid option: -$OPTARG";
@@ -69,68 +132,63 @@ while getopts ":u:r:t:p:m:" opt; do
   esac
 done
 
-if [[ -z $GITHUB_USER ]]; then
-  echo "ERROR: GitHub user not specified"
-  usage
-  exit 1
-fi
 
-if [[ -z $GITHUB_REPO ]]; then
-  echo "ERROR: GitHub repo not specified"
-  usage
-  exit 1
-fi
-
-if [[ -z $GITHUB_TAG ]]; then
-  echo "ERROR: GitHub tag not specified"
-  usage
-  exit 1
-fi
-
-if [[ -z $PM2_APP_NAME ]]; then
-  echo "ERROR: PM2 process-name not specified"
-  usage
-  exit 1
-fi
-
-if [ $MODE != 'deploy' ] && [$MODE != 'rollback']; then
-  echo "ERROR: GitHub user not specified"
-  usage
-  exit 1
-fi
-
-# LATEST_URL="https://github.com/journeymanavi/apartment-uncomplex-api/releases/latest"
-# REDIRECTED_LATEST_URL="https://github.com/journeymanavi/apartment-uncomplex-api/releases/tag/v0.0.2"
-DEPLOY_DIR=${GITHUB_REPO}-${GITHUB_TAG}
-DEPLOY_FILE=${DEPLOY_DIR}.tar.gz
-ARTIFACT_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download/${GITHUB_TAG}/${DEPLOY_FILE}"
-
-echo "GITHUB_USER:      "${GITHUB_USER}
-echo "GITHUB_REPO:      "${GITHUB_REPO}
-echo "GITHUB_TAG:       "${GITHUB_TAG}
-echo "PM2_APP_NAME:     "${PM2_APP_NAME}
-echo "PM2_ECOSYSTEM:    "${PM2_APP_NAME}
-echo "DEPLOY_DIR:       "${DEPLOY_DIR}
-echo "DEPLOY_FILE:      "${DEPLOY_FILE}
-echo "ARTIFACT_URL:     "${ARTIFACT_URL}
+#### main ####
 
 # Print commands before executing
 set -x
 
-# Create directories as needed
-if [[ ! -d $PM2_APP_NAME ]]; then
-  mkdir $PM2_APP_NAME
-else
-  rm -fr $PM2_APP_NAME/$DEPLOY_DIR
-  mkdir $DEPLOY_DIR
+echo "MODE           : "${MODE}
+
+validate_required_arg "$APP_NAME" "ERROR: App name not specified"
+echo "APP_NAME   : "${APP_NAME}
+
+if [[ $MODE = 'setup' ]]; then
+  #statements
+  validate_required_arg "$GITHUB_USER" "ERROR: GitHub user not specified"
+  echo "GITHUB_USER    : "${GITHUB_USER}
+  validate_required_arg "$GITHUB_REPO" "ERROR: GitHub repo not specified"
+  echo "GITHUB_REPO    : "${GITHUB_REPO}
+  echo "APP_ENV        : "${APP_ENV}
+
+  DEPLOY_DIR=${GITHUB_REPO}-${GITHUB_TAG}
+  echo "DEPLOY_DIR     : "${DEPLOY_DIR}
+  DEPLOY_FILE=${DEPLOY_DIR}.tar.gz
+  echo "DEPLOY_FILE    : "${DEPLOY_FILE}
+
+  #create the required directories
+
+  #create the required config files
 fi
+
+if [[ $MODE = 'deploy' ]]; then
+  validate_required_arg "$GITHUB_TAG" "ERROR: GitHub tag not specified"
+  echo "GITHUB_TAG     : "${GITHUB_TAG}
+  
+  # read config from file
+
+  # fetch deployment artifact
+  ARTIFACT_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download/${GITHUB_TAG}/${DEPLOY_FILE}"
+  # LATEST_URL="https://github.com/journeymanavi/apartment-uncomplex-api/releases/latest"
+  # REDIRECTED_LATEST_URL="https://github.com/journeymanavi/apartment-uncomplex-api/releases/tag/v0.0.2"
+  echo "ARTIFACT_URL   : "${ARTIFACT_URL}
+fi
+
 
 exit 1
 
-# Fetch deployment artefacts
-curl -sL $ARTIFACT_URL -o $PM2_APP_NAME/${DEPLOY_DIR}/${DEPLOY_FILE}
+# Create directories as needed
+if [[ ! -d $APP_NAME ]]; then
+  mkdir $APP_NAME
+else
+  rm -fr $APP_NAME/$DEPLOY_DIR
+  mkdir $DEPLOY_DIR
+fi
 
-# Extract the fetched artefacts
+# Fetch deployment artifacts
+curl -sL $ARTIFACT_URL -o $APP_NAME/${DEPLOY_DIR}/${DEPLOY_FILE}
+
+# Extract the fetched artifacts
 tar -xf $DEPLOY_DIR/$DEPLOY_FILE -C $DEPLOY_DIR
 rm -f $DEPLOY_DIR/$DEPLOY_FILE
 
@@ -142,7 +200,7 @@ cd ..
 # Run backups as needed
 
 # Bring the application down
-# pm2 stop $PM2_APP_NAME
+# pm2 stop $APP_NAME
 
 # Run any supporting deployment scripts
 
@@ -150,6 +208,6 @@ cd ..
 ln -s $DEPLOY_DIR current
 
 # Bring application back up
-# pm2 start $PM2_APP_NAME
+# pm2 start $APP_NAME
 
 # Housekeep
