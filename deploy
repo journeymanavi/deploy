@@ -6,32 +6,34 @@ set -e
 function usage {
   cat <<EOF
 
-  Usage: deploy <mode--option> <arguments>
+Usage: deploy [mode-option] <arguments>
 
-  Mode Options:
-    -d                          deploy   : Perform fresh deployment (default)
-    -s                          setup    : Perform one-time setup
-    -r                          rollback : Rolls back to previous deployment
+Deployment is done relative to the present working directory.
 
-  Arguments:
-    ** Required for all modes **
-    -n <app-name>               App name
+Mode Options:
+  -d                          deploy   : Perform fresh deployment (default)
+  -s                          setup    : Perform one-time setup
+  -b                          rollback : Rolls back to previous deployment
 
-    ** Reuqired only for 'setup' mode **
-    -a <app-main-script>        Name of the entry point script of the app
-    -u <github-user>            GitHub user
-    -r <github-repo>            GithUb repo
-    -e <file/"name val">        The environment variables to be set for the app
-                                
-                                The argument can either be a file containing all 
-                                environment variables (format: "name val", one 
-                                per line)
-                                or
-                                one or more instances of -e can be used to set
-                                individual env variables (format: "name val")
+Arguments:
+  ** Required for all modes **
+  -n <app-name>               App name
 
-    ** Required only for 'deploy' mode **    
-    -t <github-tag>             GitHub tag to be deployed
+  ** Reuqired only for 'setup' mode **
+  -a <app-main-script>        Name of the entry point script of the app
+  -e <file/"name val">        The environment variables to be set for the app
+                              
+                              The argument can either be a file containing all 
+                              environment variables (format: "name val", one 
+                              per line)
+                              or
+                              one or more instances of -e can be used to set
+                              individual env variables (format: "name val")
+  -u <github-user>            GitHub user
+  -r <github-repo>            GithUb repo
+
+  ** Required only for 'deploy' mode **    
+  -t <github-tag>             GitHub tag to be deployed
 
 EOF
 }
@@ -99,12 +101,12 @@ MODE="deploy" #default
 APP_NAME=""
 GITHUB_USER=""
 GITHUB_REPO=""
-APP_ENV=""
 GITHUB_TAG=""
+APP_ENV=""
 TMP_DIR="./tmp"
 
 # process command line argument
-while getopts ":dsru:r:t:n:e:" opt; do 
+while getopts ":dsbn:a:e:u:r:t:" opt; do 
   case $opt in
     d)
       MODE="deploy"
@@ -112,24 +114,24 @@ while getopts ":dsru:r:t:n:e:" opt; do
     s)
       MODE="setup"
     ;;
-    r)
+    b)
       MODE="rollback"
     ;;
     n)
       APP_NAME=$OPTARG
     ;;
-    n)
+    a)
       APP_SCRIPT=$OPTARG
+    ;;
+    e)
+      validate_env $OPTARG
+      process_env $OPTARG
     ;;
     u)
       GITHUB_USER=$OPTARG
     ;;
     r)
       GITHUB_REPO=$OPTARG
-    ;;
-    e)
-      validate_env $OPTARG
-      process_env $OPTARG
     ;;
     t)
       GITHUB_TAG=$OPTARG
@@ -146,112 +148,147 @@ done
 
 
 #### main ####
-
-echo "MODE           : "${MODE}
-
 validate_required_arg "$APP_NAME" "ERROR: App name not specified"
-echo "APP_NAME       : "${APP_NAME}
+
+BASE_DIR="$(pwd)/${APP_NAME}"
+PM2_PROC_FILE="${BASE_DIR}/pm2-procfile.json"
+DEPLOY_CONFIG_FILE="${BASE_DIR}/deploy.conf"
+RELEASES_DIR="${BASE_DIR}/releases"
+LOG_DIR="${BASE_DIR}/logs"
+
+echo "Running ${MODE} for application: ${APP_NAME} from ${BASE_DIR}"
 
 if [[ $MODE = 'setup' ]]; then
   validate_required_arg "$APP_SCRIPT" "ERROR: Application script not specified"
   validate_required_arg "$GITHUB_USER" "ERROR: GitHub user not specified"
   validate_required_arg "$GITHUB_REPO" "ERROR: GitHub repo not specified"
 
-  RELEASES_DIR="./${APP_NAME}/releases"
-
-  LOG_DIR="./${APP_NAME}/logs"
-  LOG_FILE="${APP_NAME}.log"
-
-  # Print commands before executing
-  set -x
-
-  #create the required directories
-  if [[ ! -d $APP_NAME ]]; then
-    mkdir $APP_NAME
-  else
-    rm -fr $APP_NAME/$RELEASES_DIR
-    mkdir $RELEASES_DIR
+  if [[ ! -d "${RELEASES_DIR}" ]]; then
+    echo "making releases directory ${RELEASES_DIR}"
+    mkdir -p "${RELEASES_DIR}"
   fi
 
-  #create the required config files
-  # {
-  #   "apps" : [
-  #     {
-  #       "name"            : <appname>,
-  #       "instances"       : 1,
-  #       "cwd"             : <point to current release dir>,
-  #       "script"          : <appscript with path relative to cwd>,
-  #
-  #       "log_date_format" : “YYYY-MM-DD HH:mm Z”,
-  #       "error_file"      : <filename with path relative to cwd>,
-  #       "out_file"        : <filename with path relative to cwd>,
-  #       "pid_file"        : <filename with path relative to cwd>,
-  #
-  #       "env": {
-  #           <insert env>,
-  #          "NODE_ENV"     : "production"
-  #        }
-  #     }
-  #   ]
-  # }
+  if [[ ! -d "${LOG_DIR}" ]]; then
+    echo "making logs directory ${LOG_DIR}"
+    mkdir -p "${LOG_DIR}"
+  fi
 
-  CONFIG_FILE="deploy.conf"
-  echo "APP_NAME|"${APP_NAME}
-  echo "APP_SCRIPT|"%{APP_SCRIPT}
-  echo "RELEASES_DIR|"${RELEASES_DIR}
-  echo "ARTIFACT_FILE|"${ARTIFACT_FILE}
-  echo "LOG_DIR|"${LOG_DIR}
-  echo "LOG_FILE|"${LOG_FILE}
-  echo "APP_ENV|"${APP_ENV}
-  
-  echo "GITHUB_USER|"${GITHUB_USER}
-  echo "GITHUB_REPO|"${GITHUB_REPO}
+  OUT_LOG_FILE="${LOG_DIR}/${APP_NAME}-out.log"
+  ERR_LOG_FILE="${LOG_DIR}/${APP_NAME}-err.log"
+  PID_FILE="${LOG_DIR}/${APP_NAME}-pm2.pid"
+
+  echo "writing PM2 procfile ${PM2_PROC_FILE}" 
+  cat <<EOF > "${PM2_PROC_FILE}"
+{
+  "apps" : [
+    {
+      "name"            : "${APP_NAME}",
+      "cwd"             : "${BASE_DIR}/current",
+      "script"          : "${APP_SCRIPT}",
+
+      "log_date_format" : “YYYY-MM-DD HH:mm:ss.SSS Z”,
+      "log_type"        : "json"
+      "error_file"      : "${ERR_LOG_FILE}",
+      "out_file"        : "${OUT_LOG_FILE}",
+      "pid_file"        : "${PID_FILE}",
+
+      "env": {
+        "${APP_ENV}",
+        "NODE_ENV"     : "production"
+      }
+    }
+  ]
+}
+EOF
+
+  echo "saving deploy configuration to ${DEPLOY_CONFIG_FILE}"
+  echo "GITHUB_USER|"${GITHUB_USER} >  "${DEPLOY_CONFIG_FILE}"
+  echo "GITHUB_REPO|"${GITHUB_REPO} >> "${DEPLOY_CONFIG_FILE}"
+
+  echo "Application ${APP_NAME} suuccessfully set up for deployment."
 fi
 
 if [[ $MODE = 'deploy' ]]; then
   validate_required_arg "$GITHUB_TAG" "ERROR: GitHub tag not specified"
-  echo "GITHUB_TAG     : "${GITHUB_TAG}
+  echo "Deploying tag : ${GITHUB_TAG}"
   
   # read config from file (show error if absent)
+  echo "reading deployment configuration from ${DEPLOY_CONFIG_FILE}"
+  if [[ -r "${DEPLOY_CONFIG_FILE}" ]]; then
+    GITHUB_USER=$(grep 'GITHUB_USER' "${DEPLOY_CONFIG_FILE}" | cut -d "|" -f2)
+    if [[ -z "${GITHUB_USER}" ]]; then
+      echo "ERROR: Failed to load config: GITHUB_USER"
+      exit 1
+    else
+      echo "GITHUB_USER : ${GITHUB_USER}"
+    fi
 
-  ARTIFACT_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download/${GITHUB_TAG}/${DEPLOY_FILE}"
-  # LATEST_URL="https://github.com/journeymanavi/apartment-uncomplex-api/releases/latest"
-  # REDIRECTED_LATEST_URL="https://github.com/journeymanavi/apartment-uncomplex-api/releases/tag/v0.0.2"
-  echo "ARTIFACT_URL   : "${ARTIFACT_URL}
-  
-  # Print commands before executing
-  set -x
+    GITHUB_REPO=$(grep 'GITHUB_REPO' "${DEPLOY_CONFIG_FILE}" | cut -d "|" -f2)
+    if [[ -z "${GITHUB_REPO}" ]]; then
+      echo "ERROR: Failed to load config: GITHUB_REPO"
+      exit 1
+    else
+      echo "GITHUB_USER : ${GITHUB_REPO}"
+    fi
+  else
+    echo "ERROR: Expected deployment configuration file ${DEPLOY_CONFIG_FILE} not found or not readable"
+    exit 1
+  fi
 
   # Fetch deployment artifacts
-  mkdir "$TMP_DIR"
-  ARTIFACT_FILE="${TMP_DIR}/${DEPLOY_FILE}"
-  curl -sL "${ARTIFACT_URL}" -o "${ARTIFACT_FILE}"
+  if [[ ! -d "${TMP_DIR}" ]]; then
+    mkdir "$TMP_DIR"
+  fi
+  RELEASE_PACKAGE="${GITHUB_REPO}-${GITHUB_TAG}.tar.gz"
+  ARTIFACT_URL="https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download/${GITHUB_TAG}/${RELEASE_PACKAGE}"
+  SAVED_RELEASE_PACKAGE="${TMP_DIR}/${RELEASE_PACKAGE}"
+  # LATEST_URL           ="https://github.com/journeymanavi/apartment-uncomplex-api/releases/latest"
+  # REDIRECTED_LATEST_URL="https://github.com/journeymanavi/apartment-uncomplex-api/releases/tag/v0.0.2"
+  echo "downloading deployment artifact from: ${ARTIFACT_URL}"
+  echo "saving to ${SAVED_RELEASE_PACKAGE}"
+  if [[ ! -z $(curl -IsL "${ARTIFACT_URL}" | grep '404 Not Found') ]]; then
+    echo "ERROR: Deployment artifact not found at above URL"
+    exit 1
+  else
+    curl -sL "${ARTIFACT_URL}" -o "${SAVED_RELEASE_PACKAGE}"
+  fi
 
   # Extract the fetched artifacts
-  tar -xf "${ARTIFACT_FILE}" -C $DEPLOY_DIR
-  rm -f $DEPLOY_DIR/$DEPLOY_FILE
+  APP_DEPLOY_DIR="${RELEASES_DIR}/${GITHUB_TAG}"
+  echo "extracting release package ${SAVED_RELEASE_PACKAGE} to ${APP_DEPLOY_DIR}"
+  if [[ -d "${APP_DEPLOY_DIR}" ]]; then
+    rm -fr "${APP_DEPLOY_DIR}/*"
+  else
+    mkdir "${APP_DEPLOY_DIR}"
+  fi
+  tar -xf "${SAVED_RELEASE_PACKAGE}" -C "${APP_DEPLOY_DIR}"
 
   # Install app dependencies
-  cd $DEPLOY_DIR
-  yarn install
-  cd ..
+  echo "installing application dependencies"
+  cd "${APP_DEPLOY_DIR}"
+  yarn install --prod -s
 
   # Run backups as needed
 
   # Bring the application down
-  # pm2 stop $APP_NAME
+  # pm2 stop "${APP_NAME}"
 
   # Run any supporting deployment scripts
 
   # Switch symlinks
-  ln -s $DEPLOY_DIR current
+  echo "switching current application to new deployment: ${APP_DEPLOY_DIR}"
+  cd "${BASE_DIR}"
+  rm -fr current
+  ln -s "${APP_DEPLOY_DIR}" current
 
   # Bring application back up
-  # pm2 start <proc_file> --update-env
+  # pm2 start "${PM2_PROC_FILE}" --update-env
 
   #Check app up
 
   #Write to deployment log
+  echo "$(date "+%Y-%m-%d %H:%M:%S"): Successfull deployment of ${APP_NAME}\
+ release ${GITHUB_TAG} by user $(whoami)" | tee -a "${LOG_DIR}/revision.log"
 fi
 
 if [[ $MODE = 'rollback' ]]; then
@@ -259,5 +296,6 @@ if [[ $MODE = 'rollback' ]]; then
 fi
 
 # Housekeep and exit
-rmdir $TMP_DIR
+cd "${BASE_DIR}/.."
+rm -fr $TMP_DIR
 exit 0
