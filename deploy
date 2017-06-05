@@ -97,7 +97,7 @@ APP_NAME=""
 GITHUB_USER=""
 GITHUB_REPO=""
 GITHUB_TAG=""
-APP_ENV=""
+APP_ENV="\"NODE_ENV\":\"production\""
 TMP_DIR="./tmp"
 
 # process command line argument
@@ -187,8 +187,7 @@ if [[ $MODE = 'setup' ]]; then
       "pid_file"        : "${PID_FILE}",
 
       "env": {
-        "${APP_ENV}",
-        "NODE_ENV"     : "production"
+        ${APP_ENV}
       }
     }
   ]
