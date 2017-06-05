@@ -24,11 +24,11 @@ Arguments:
   -e <file/"name val">        The environment variables to be set for the app
                               
                               The argument can either be a file containing all 
-                              environment variables (format: "name val", one 
+                              environment variables (format: name=val, one 
                               per line)
                               or
                               one or more instances of -e can be used to set
-                              individual env variables (format: "name val")
+                              individual env variables (format: name=val)
   -u <github-user>            GitHub user
   -r <github-repo>            GithUb repo
 
@@ -44,14 +44,6 @@ function validate_required_arg {
     usage
     exit 1
   fi  
-}
-
-function validate_env {
-  if [[ ! -r $1 ]] && ( [[ ! -n $1 ]] || [[ ! -n $2 ]] ); then
-    echo "ERROR: Invalid environment argument"
-    usage
-    exit 1
-  fi
 }
 
 # Function to process environment to be used for running application process
@@ -82,17 +74,20 @@ function validate_env {
 # ${arr[i]}      : Accessing array elements
 function process_env {
   if [[ -r $1 ]]; then
-    while read -r name val; do
-      if [[ -n $APP_ENV ]]; then
-        APP_ENV="${APP_ENV},"
-      fi
-      APP_ENV="${APP_ENV}\"$name\":\"$val\""
+    while read -r line; do
+      process_env "${line}"
     done < $1
   else
+    IFS='=' read name val <<<$1 # a quick way to split delimited name val pair
+    if [[ -z "${name}" ]] || [[ -z "${val}" ]]; then
+      echo "ERROR: Invalid environment argument: $1"
+      usage
+      exit 1
+    fi
     if [[ -n $APP_ENV ]]; then
       APP_ENV="${APP_ENV},"
     fi
-    APP_ENV="${APP_ENV}\"$1\":\"$2\""
+    APP_ENV="${APP_ENV}\"${name}\":\"${val}\""
   fi
 }
 
@@ -124,7 +119,6 @@ while getopts ":dsbn:a:e:u:r:t:" opt; do
       APP_SCRIPT=$OPTARG
     ;;
     e)
-      validate_env $OPTARG
       process_env $OPTARG
     ;;
     u)
