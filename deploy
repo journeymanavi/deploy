@@ -264,7 +264,10 @@ if [[ $MODE = 'deploy' ]]; then
   # Run backups as needed
 
   # Bring the application down
-  # pm2 stop "${APP_NAME}"
+  if [[ -n $(pm2 list | grep "${APP_NAME}.*online") ]]; then
+    echo "stopping existing application process"
+    pm2 stop "${APP_NAME}"
+  fi
 
   # Run any supporting deployment scripts
 
@@ -275,7 +278,8 @@ if [[ $MODE = 'deploy' ]]; then
   ln -s "${APP_DEPLOY_DIR}" current
 
   # Bring application back up
-  # pm2 start "${PM2_PROC_FILE}" --update-env
+  echo "starting new application process"
+  pm2 start "${PM2_PROC_FILE}" --update-env
 
   #Check app up
 
