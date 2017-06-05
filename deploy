@@ -181,7 +181,7 @@ if [[ $MODE = 'setup' ]]; then
       "script"          : "${APP_SCRIPT}",
 
       "log_date_format" : "YYYY-MM-DD HH:mm:ss.SSS Z",
-      "log_type"        : "json"
+      "log_type"        : "json",
       "error_file"      : "${ERR_LOG_FILE}",
       "out_file"        : "${OUT_LOG_FILE}",
       "pid_file"        : "${PID_FILE}",
