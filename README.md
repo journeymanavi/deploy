@@ -76,11 +76,23 @@ Arguments:
 ```
 
 # Future Enhancements
-
+* Add a `-g` _generate_ option that generates a template config file. When 
+  specified with a `-c` argument, this should write the config template to the
+  file specified by `-c` else `cwd`
+* Add a `-c` argument to specify a deployment **setup configuration file** 
+  to bn used with the `-s` run modes.
+  This config file should suppor:
+  - **Deployment identifier:** (equivalent to `-n` argument)
+  - **Deployment type**: website/webapp _(webapp is assumed to be a nodejs webapp)_
+  - **Entry point**: In case of `website` deployment type this would be a **document-root**.
+    In case of a `webapp` deployment type this would be the **app-main-script** (equivalent to `-a` argument).
+  - **Environment**: equivalent to the `-e`
+  - **GitHub Repo**: equivlent to `-u` and `-r` argument
+* Add feature to **generate Nginx config** when run in setup mode
 * Implement deployment steps that allow you to
   * Perform automated backups of important entities before deployment
   * Run arbitrary scripts as part of the deployment
-  * Perform the deployment in a way that does not cause any application downtime
+  * Perform the deployment in a way that does not cause application downtime
   * Check a 'status' endpoint of the application post deployment to make sure 
     deployment was successful
 * Create a `trigger` component that can be used to trigger deployments remotely
