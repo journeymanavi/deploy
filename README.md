@@ -76,25 +76,44 @@ Arguments:
 ```
 
 # Future Enhancements
-* Add a `-g` _generate_ option that generates a template config file. When 
+* **Init or Generate Mode:**
+
+  Add a `-g` _generate_ option that generates a template config file. When 
   specified with a `-c` argument, this should write the config template to the
-  file specified by `-c` else `cwd`
-* Add a `-c` argument to specify a deployment **setup configuration file** 
-  to bn used with the `-s` run modes.
-  This config file should suppor:
-  - **Deployment identifier:** (equivalent to `-n` argument)
-  - **Deployment type**: website/webapp _(webapp is assumed to be a nodejs webapp)_
-  - **Entry point**: In case of `website` deployment type this would be a **document-root**.
-    In case of a `webapp` deployment type this would be the **app-main-script** (equivalent to `-a` argument).
+  file specified by `-c` else `pwd`.
+
+  This could also be a `-i` _init_ mode, that would interactively ask for deployment
+  configuration parameters and generate a corresponding config file (a bit like `npm init`).
+  
+  This can be then followed up with a `-s` run that would use this config and setup 
+  the app for deployment (a bit like `npm install`).
+
+  Finally you would run a deploy using the `-d` deploy option. 
+  
+  **Configuration File** should support:
+  - **Deployment Type**: website/webapp _(webapp is assumed to be a nodejs webapp)_
+  - **Webapp Entry Point**: In case of a `webapp` deployment type, additionally 
+    ask for the **app-main-script** (equivalent to `-a` argument).
+    > In case of `website` deployment type, the root application directory will be 
+    > set up as the **document-root**.
   - **Environment**: equivalent to the `-e`
-  - **GitHub Repo**: equivlent to `-u` and `-r` argument
-* Add feature to **generate Nginx config** when run in setup mode
-* Implement deployment steps that allow you to
+  - **GitHub Repo**: equivalent to `-u` and `-r` argument
+  - **SSL Certs**: equivalent to `-u` and `-r` argument
+* **Generate Nginx Conf:** Add a feature to generate basic Nginx config (paired with
+  `-i` or `-s` as appropriate). This should cover Nginx config for both `website` 
+  and `webapp` deployments.
+* **Dedupe Environment:** Change logic to not make a copy of the application 
+  environment variables in the pm2 proc-file. The `init` run should juts ask for 
+  and save the location of env file (after validating format). This env file should 
+  then be used each time `pm2 start` is called to supply environment variables on 
+  the command line itself rather than relying on the ones copied in to the pm2 proc-file.
+* **Additional Deployment Steps:** Implement deployment steps that allow you to
   * Perform automated backups of important entities before deployment
   * Run arbitrary scripts as part of the deployment
   * Perform the deployment in a way that does not cause application downtime
   * Check a 'status' endpoint of the application post deployment to make sure 
     deployment was successful
-* Create a `trigger` component that can be used to trigger deployments remotely
-* Feature to omit `-t <tag>` argument and fetch `latest` tagged release artefacts 
-  in that case
+* **Remote Trigger:** Create a `trigger` component that can be used to trigger 
+  deployments remotely
+* **Auto-Deploy Latest Tag:** Feature to omit `-t <tag>` argument and fetch 
+  `latest` tagged release artefacts in that case
